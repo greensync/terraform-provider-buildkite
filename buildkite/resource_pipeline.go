@@ -12,6 +12,7 @@ import (
 
 // PipelineNode represents a pipeline as returned from the GraphQL API
 type PipelineNode struct {
+	Archived 														 graphql.Boolean
 	CancelIntermediateBuilds             graphql.Boolean
 	CancelIntermediateBuildsBranchFilter graphql.String
 	DefaultBranch                        graphql.String
@@ -62,6 +63,11 @@ func resourcePipeline() *schema.Resource {
 		},
 
 		Schema: map[string]*schema.Schema{
+			"archived": {
+ 				Computed: true,
+ 				Optional: true,
+ 				Type:     schema.TypeBool,
+ 			},
 			"cancel_intermediate_builds": {
 				Computed: true,
 				Optional: true,
@@ -376,6 +382,7 @@ func UpdatePipeline(ctx context.Context, d *schema.ResourceData, m interface{}) 
 	}
 
 	updatePipelineResource(d, &mutation.PipelineUpdate.Pipeline)
+	archiveOrUnarchivePipeline(d, client)
 
 	pipelineExtraInfo, err := updatePipelineExtraInfo(d, client)
 	if err != nil {
@@ -466,6 +473,70 @@ func updatePipelineExtraInfo(d *schema.ResourceData, client *Client) (PipelineEx
 		return pipelineExtraInfo, err
 	}
 	return pipelineExtraInfo, nil
+}
+
+func archiveOrUnarchivePipeline(d *schema.ResourceData, client *Client) (error) {
+	pipelineID := d.Id()
+
+	archived, err := getArchivedStatusForPipeline(pipelineID, client)
+	if err != nil {
+		log.Printf("Unable to get achived status for pipeline %s", pipelineID)
+		return err
+	}
+
+	if d.Get("archived").(bool) && !archived {  //schema says the pipeline should be archived but it's not
+		var mutation struct {
+			PipelineArchive struct {
+				Pipeline struct {
+					ID graphql.ID
+				}
+			} `graphql:"pipelineArchive(input: {id: $id})"`
+		}
+		params := map[string]interface{}{
+			"id": graphql.ID(pipelineID),
+		}
+		err := client.graphql.Mutate(context.Background(), &mutation, params)
+		if err != nil {
+			log.Printf("Unable to archive pipeline %s", pipelineID)
+			return err
+		}
+	} else if !d.Get("archived").(bool) && archived { //schema says the pipeline should be unarchived but it's not
+		var mutation struct {
+			PipelineUnarchive struct {
+				Pipeline struct {
+					ID graphql.ID
+				}
+			} `graphql:"pipelineUnarchive(input: {id: $id})"`
+		}
+		params := map[string]interface{}{
+			"id": graphql.ID(pipelineID),
+		}
+		err := client.graphql.Mutate(context.Background(), &mutation, params)
+		if err != nil {
+			log.Printf("Unable to unarchive pipeline %s", pipelineID)
+			return err
+		}
+	}
+	return nil
+}
+
+func getArchivedStatusForPipeline(pipelineId string, client *Client) (bool, error){
+	var query struct {
+		Node struct {
+			Pipeline PipelineNode `graphql:"... on Pipeline"`
+		} `graphql:"pipeline(slug: $id)"`
+	}
+
+	vars := map[string]interface{}{
+		"id": pipelineId,
+	}
+
+	err := client.graphql.Query(context.Background(), &query, vars)
+	if err != nil {
+		return false, fmt.Errorf("Error fetching pipeline from graphql API: %v", err)
+	}
+
+	return bool(query.Node.Pipeline.Archived), nil
 }
 
 func getTeamPipelinesFromSchema(d *schema.ResourceData) []TeamPipelineNode {
