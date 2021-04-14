@@ -284,6 +284,7 @@ func CreatePipeline(ctx context.Context, d *schema.ResourceData, m interface{}) 
 	}
 
 	vars := map[string]interface{}{
+		"archived":																	graphql.Boolean(d.Get("archived").(bool)),
 		"cancel_intermediate_builds":               graphql.Boolean(d.Get("cancel_intermediate_builds").(bool)),
 		"cancel_intermediate_builds_branch_filter": graphql.String(d.Get("cancel_intermediate_builds_branch_filter").(string)),
 		"default_branch":                           graphql.String(d.Get("default_branch").(string)),
@@ -485,6 +486,7 @@ func archiveOrUnarchivePipeline(d *schema.ResourceData, client *Client) (error) 
 	}
 
 	if d.Get("archived").(bool) && !archived {  //schema says the pipeline should be archived but it's not
+		log.Printf("Archiving pipeline: %v", pipelineID)
 		var mutation struct {
 			PipelineArchive struct {
 				Pipeline struct {
@@ -501,6 +503,7 @@ func archiveOrUnarchivePipeline(d *schema.ResourceData, client *Client) (error) 
 			return err
 		}
 	} else if !d.Get("archived").(bool) && archived { //schema says the pipeline should be unarchived but it's not
+		log.Printf("Unarchiving pipeline: %v", pipelineID)
 		var mutation struct {
 			PipelineUnarchive struct {
 				Pipeline struct {
@@ -516,6 +519,8 @@ func archiveOrUnarchivePipeline(d *schema.ResourceData, client *Client) (error) 
 			log.Printf("Unable to unarchive pipeline %s", pipelineID)
 			return err
 		}
+	} else {
+		log.Printf("Pipeline already matched desired archive status: %v", pipelineID)
 	}
 	return nil
 }

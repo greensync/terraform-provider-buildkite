@@ -137,6 +137,57 @@ func TestAccPipeline_update(t *testing.T) {
 	})
 }
 
+// Confirm that we can create a new pipeline, archive it, then unarchive it
+func TestAccPipeline_archiving(t *testing.T) {
+	var resourcePipeline PipelineNode
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:     func() { testAccPreCheck(t) },
+		Providers:    testAccProviders,
+		CheckDestroy: testAccCheckPipelineResourceDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccPipelineConfigBasic("foo"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					// Confirm the pipeline exists in the buildkite API
+					testAccCheckPipelineExists("buildkite_pipeline.foobar", &resourcePipeline),
+					// Quick check to confirm the local state is correct before we update it
+					resource.TestCheckResourceAttr("buildkite_pipeline.foobar", "name", "Test Pipeline foo"),
+				),
+			},
+			{
+				Config: testAccPipelineConfigBasicWithArchive("foo", true),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					// Confirm the pipeline exists in the buildkite API
+					testAccCheckPipelineExists("buildkite_pipeline.foobar", &resourcePipeline),
+					// Confirm the pipeline has the updated values in Buildkite's system
+					testAccCheckPipelineRemoteValues(&resourcePipeline, "Test Pipeline foo"),
+					testAccCheckPipelineRemoteArchivedStatus(&resourcePipeline, true),
+					// Confirm the pipeline has the updated values in terraform state
+					resource.TestCheckResourceAttr("buildkite_pipeline.foobar", "archived", "true"),
+					func(s *terraform.State) error {
+						for {
+
+						}
+					},
+				),
+			},
+			{
+				Config: testAccPipelineConfigBasicWithArchive("foo", false),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					// Confirm the pipeline exists in the buildkite API
+					testAccCheckPipelineExists("buildkite_pipeline.foobar", &resourcePipeline),
+					// Confirm the pipeline has the updated values in Buildkite's system
+					testAccCheckPipelineRemoteValues(&resourcePipeline, "Test Pipeline foo"),
+					testAccCheckPipelineRemoteArchivedStatus(&resourcePipeline, false),
+					// Confirm the pipeline has the updated values in terraform state
+					resource.TestCheckResourceAttr("buildkite_pipeline.foobar", "archived", "false"),
+				),
+			},
+		},
+	})
+}
+
 func TestAccPipeline_update_withteams(t *testing.T) {
 	var resourcePipeline PipelineNode
 
@@ -277,6 +328,16 @@ func testAccCheckPipelineRemoteValues(resourcePipeline *PipelineNode, name strin
 	}
 }
 
+func testAccCheckPipelineRemoteArchivedStatus(resourcePipeline *PipelineNode, archived bool) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+
+		if bool(resourcePipeline.Archived) != archived {
+			return fmt.Errorf("remote pipeline archived state (%t) doesn't match expected value (%t)", bool(resourcePipeline.Archived), archived)
+		}
+		return nil
+	}
+}
+
 func testAccPipelineConfigBasic(name string) string {
 	config := `
 		resource "buildkite_pipeline" "foobar" {
@@ -286,6 +347,18 @@ func testAccPipelineConfigBasic(name string) string {
 		}
 	`
 	return fmt.Sprintf(config, name)
+}
+
+func testAccPipelineConfigBasicWithArchive(name string, archived bool) string {
+	config := `
+		resource "buildkite_pipeline" "foobar" {
+			archived = %t
+			name = "Test Pipeline %s"
+			repository = "https://github.com/buildkite/terraform-provider-buildkite.git"
+			steps = ""
+		}
+	`
+	return fmt.Sprintf(config, archived, name)
 }
 
 func testAccPipelineConfigBasicWithTeam(name string) string {
